@@ -1,0 +1,4 @@
+[{<<"eleveldb">>,
+  {git,"git://github.com/basho/eleveldb.git",
+       {ref,"e3ad5ec99b6a8e18b1d05bab90c8a34a8626ce3f"}},
+  0}].
