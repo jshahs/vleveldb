@@ -2,5 +2,8 @@
 
 -setcookie vernedb_cookie
 
+
 +K true
 +A30
+
+-smp enable

@@ -102,10 +102,11 @@ call(Key, Req) ->
 %%--------------------------------------------------------------------
 init([InstanceId]) ->
     %% Initialize random seed
-    rand:seed(os:timestamp()),
+    random:seed(os:timestamp()),
 
-    Opts = vmq_config:get_env(msg_store_opts, []),
+    Opts = [{store_dir,"./data/msgstore"}],
     DataDir1 = proplists:get_value(store_dir, Opts, "data/msgstore"),
+    %DataDir1 = "./data/msgstore",
     DataDir2 = filename:join(DataDir1, integer_to_list(InstanceId)),
 
     %% Initialize state
@@ -120,7 +121,7 @@ init([InstanceId]) ->
                                [N, InstanceId])
             end,
             %% Register Bucket Instance with the Bucket Registry
-            vmq_lvldb_store_sup:register_bucket_pid(InstanceId, self()),
+            vernedb_sup:register_bucket_pid(InstanceId, self()),
             {ok, State};
         {error, Reason} ->
             {stop, Reason}
@@ -224,7 +225,7 @@ init_state(DataRoot, Config) ->
     %% under heavy uniform load...
     WriteBufferMin = config_value(write_buffer_size_min, MergedConfig, 30 * 1024 * 1024),
     WriteBufferMax = config_value(write_buffer_size_max, MergedConfig, 60 * 1024 * 1024),
-    WriteBufferSize = WriteBufferMin + rand:uniform(1 + WriteBufferMax - WriteBufferMin),
+    WriteBufferSize = WriteBufferMin + random:uniform(1 + WriteBufferMax - WriteBufferMin),
 
     %% Update the write buffer size in the merged config and make sure create_if_missing is set
     %% to true
@@ -255,7 +256,7 @@ init_state(DataRoot, Config) ->
     end,
 
     %% Generate a debug message with the options we'll use for each operation
-    lager:debug("Datadir ~s options for LevelDB: ~p\n",
+    io:format("Datadir ~s options for LevelDB: ~p\n",
                 [DataRoot, [{open, OpenOpts}, {read, ReadOpts}, {write, WriteOpts}, {fold, FoldOpts}]]),
     #state { data_root = DataRoot,
              open_opts = OpenOpts,
