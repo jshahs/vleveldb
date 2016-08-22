@@ -61,7 +61,7 @@ msg_store_find(SubscriberId) ->
     end.
 
 msg_store_init_queue_collector(ParentPid, SubscriberId, Ref) ->
-    Pids = vmq_lvldb_store_sup:get_bucket_pids(),
+    Pids = vernedb_sup:get_bucket_pids(),
     Acc = ordsets:new(),
     ResAcc = msg_store_collect(SubscriberId, Pids, Acc),
     ParentPid ! {self(), Ref, ordsets:to_list(ResAcc)}.
@@ -78,7 +78,7 @@ refcount(MsgRef) ->
     call(MsgRef, {refcount, MsgRef}).
 
 call(Key, Req) ->
-    case vmq_lvldb_store_sup:get_bucket_pid(Key) of
+    case vernedb_sup:get_bucket_pid(Key) of
         {ok, BucketPid} ->
             gen_server:call(BucketPid, Req, infinity);
         {error, Reason} ->

@@ -1,6 +1,7 @@
--sname vernedb
+-name vernedb@172.31.24.230
 
 -setcookie vernedb_cookie
+
 
 
 +K true
