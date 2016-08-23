@@ -8,6 +8,9 @@
          msg_store_read/2,
          msg_store_delete/2,
          msg_store_find/1,
+	msg_store_read_plum/2,
+	msg_store_delete_plum/2,
+	msg_store_write_plum/2,
          get_ref/1,
          refcount/1]).
 
@@ -38,8 +41,17 @@
 start_link(Id) ->
     gen_server:start_link(?MODULE, [Id], []).
 
-msg_store_write(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
-    call(MsgRef, {write, SubscriberId, Msg}).
+msg_store_write_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
+    call(MsgRef, {write_plum, SubscriberId, Msg}).
+
+msg_store_delete_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
+    call(MsgRef, {delete_plum, SubscriberId, Msg}).
+
+msg_store_read_plum(SubscriberId, MsgRef) ->
+    call(MsgRef, {read_plum, SubscriberId, MsgRef}).
+
+msg_store_write(SubscriberId, MsgRef) ->
+    call(MsgRef, {write, SubscriberId, MsgRef}).
 
 msg_store_delete(SubscriberId, MsgRef) ->
     call(MsgRef, {delete, SubscriberId, MsgRef}).
@@ -302,6 +314,26 @@ open_db(Opts, State0, RetriesLeft, _) ->
             {error, Reason}
     end.
 
+%%=====================================================================
+%%
+%% new LEVEL DB functions
+%%=====================================================================
+
+handle_req({write_plum, {MP, _} = SubscriberId,
+            #vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
+                     routing_key=RoutingKey, payload=Payload} = VmqMsg},
+           #state{ref=Bucket, refs=Refs, write_opts=WriteOpts}) ->
+   MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
+   Val = term_to_binary(VmqMsg),
+   plumtree_metadata:put({oktalk,offline_store},MsgKey,Val);
+
+
+handle_req({read_plum, {MP, _} = SubscriberId, MsgRef},
+           #state{ref=Bucket, refs=Refs, write_opts=WriteOpts}) ->
+   MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
+   Val = plumtree_metadata:get({oktalk,offline_store},MsgKey,[{default, []}]),
+   VmqMsg = binary_to_term(Val),
+   {ok,VmqMsg};
 
 handle_req({write, {MP, _} = SubscriberId,
             #vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
