@@ -22,6 +22,7 @@
 
 start_link() ->
     {ok, Pid} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+         {ok, _} = supervisor:start_child(Pid, child_spec(0)),
     {ok, Pid}.
 
 %% ===================================================================
@@ -34,6 +35,5 @@ init([]) ->
 
 child_spec(I) ->
     {{vmq_lvldb_store_bucket, I},
-     {vernedb_store, start_link, [I]},
+     {vernedb_store, start_link, []},
      permanent, 5000, worker, [vernedb_store]}.
-

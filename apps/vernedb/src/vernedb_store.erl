@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1,
+-export([start_link/0,
 	msg_store_read_plum/2,
 	msg_store_delete_plum/2,
 	msg_store_write_plum/2]).
@@ -23,8 +23,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link(Id) ->
-    gen_server:start_link(?MODULE, [], []).
+start_link() ->
+    gen_server:start_link({local,?MODULE},?MODULE, [], []).
 
 msg_store_write_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
     call(MsgRef, {write_plum, SubscriberId, Msg}).
@@ -55,7 +55,7 @@ call(Key, Req) ->
 %% @end
 %%--------------------------------------------------------------------
 init(_) ->
-	#state{future_purpose = ok}.
+	{ok,#state{future_purpose = ok}}.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
