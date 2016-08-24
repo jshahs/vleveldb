@@ -4,7 +4,7 @@
 
 %% API
 -export([start_link/0,
-	msg_store_read_plum/2,
+	msg_store_read_plum/1,
 	msg_store_delete_plum/2,
 	msg_store_write_plum/2]).
 
@@ -32,8 +32,8 @@ msg_store_write_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
 msg_store_delete_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
     call(MsgRef, {delete_plum, SubscriberId, Msg}).
 
-msg_store_read_plum(SubscriberId, MsgRef) ->
-    call(MsgRef, {read_plum, SubscriberId, MsgRef}).
+msg_store_read_plum(SubscriberId) ->
+    call("not",{read_plum, SubscriberId}).
 
 
 call(Key, Req) ->
@@ -55,6 +55,8 @@ call(Key, Req) ->
 %% @end
 %%--------------------------------------------------------------------
 init(_) ->
+	application:start(lager),
+	application:start(plumtree),
 	{ok,#state{future_purpose = ok}}.
 %%--------------------------------------------------------------------
 %% @private
@@ -128,21 +130,62 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+update_offline_ref(SubscriberId,MsgRef) ->
+	case plumtree_metadata:get({oktalk,msgref}, SubscriberId) of
+                undefined ->
+		   plumtree_metadata:put({oktalk,msgref}, SubscriberId,
+                                          MsgRef);
+                [] ->
+		   plumtree_metadata:put({oktalk,msgref}, SubscriberId,
+                                          MsgRef);
+                Refs ->
+		    NewRef = [Refs | MsgRef],
+                    plumtree_metadata:put({oktalk,msgref}, SubscriberId,
+                                          NewRef)
+            end.
+
+get_offline_ref(SubscriberId)->
+   case plumtree_metadata:get({oktalk,msgref}, SubscriberId) of
+                undefined ->
+			not_found;
+                [] ->
+			not_found;
+                Refs ->
+		  Refs
+            end.
+
+
+get_msg(SubscriberId,MsgRef)->
+   MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
+   case plumtree_metadata:get({oktalk,offline_store},MsgKey,[{default, []}]) of
+        [] ->
+                not_found;
+        Val ->
+                VmqMsg = binary_to_term(Val),
+                VmqMsg
+  end.
+
+handle_req({read_plum, {MP, _} = SubscriberId},
+           _State) ->
+   MsgRefs = get_offline_ref(SubscriberId),
+   case MsgRefs of
+        not_found ->
+                not_found;
+        Refs ->
+                [get_msg(SubscriberId,X)|| X <- Refs]
+   end;
+
 handle_req({write_plum, {MP, _} = SubscriberId,
             #vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
                      routing_key=RoutingKey, payload=Payload} = VmqMsg},
            _State) ->
+   Res = update_offline_ref(SubscriberId,MsgRef),
+   lager:debug("Status of reference table update::~p~n",[Res]),
    MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
    Val = term_to_binary(VmqMsg),
    plumtree_metadata:put({oktalk,offline_store},MsgKey,Val);
 
 
-handle_req({read_plum, {MP, _} = SubscriberId, MsgRef},
-           _State) ->
-   MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
-   Val = plumtree_metadata:get({oktalk,offline_store},MsgKey,[{default, []}]),
-   VmqMsg = binary_to_term(Val),
-   {ok,VmqMsg};
 
 handle_req({delete_plum, {MP, _} = SubscriberId, MsgRef},
            _State) ->
