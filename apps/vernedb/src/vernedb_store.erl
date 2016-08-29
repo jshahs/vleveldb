@@ -134,12 +134,12 @@ update_offline_ref(SubscriberId,MsgRef) ->
 	case plumtree_metadata:get({oktalk,msgref}, SubscriberId) of
                 undefined ->
 		   plumtree_metadata:put({oktalk,msgref}, SubscriberId,
-                                          MsgRef);
+                                          [MsgRef]);
                 [] ->
 		   plumtree_metadata:put({oktalk,msgref}, SubscriberId,
-                                          MsgRef);
+                                          [MsgRef]);
                 Refs ->
-		    NewRef = [Refs | MsgRef],
+		    NewRef = [MsgRef|Refs],
                     plumtree_metadata:put({oktalk,msgref}, SubscriberId,
                                           NewRef)
             end.
@@ -172,6 +172,7 @@ handle_req({read_plum, {MP, _} = SubscriberId},
         not_found ->
                 not_found;
         Refs ->
+		io:format("The ref::~p~n",[Refs]),
                 [get_msg(SubscriberId,X)|| X <- Refs]
    end;
 
@@ -180,7 +181,6 @@ handle_req({write_plum, {MP, _} = SubscriberId,
                      routing_key=RoutingKey, payload=Payload} = VmqMsg},
            _State) ->
    Res = update_offline_ref(SubscriberId,MsgRef),
-   lager:debug("Status of reference table update::~p~n",[Res]),
    MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
    Val = term_to_binary(VmqMsg),
    plumtree_metadata:put({oktalk,offline_store},MsgKey,Val);
