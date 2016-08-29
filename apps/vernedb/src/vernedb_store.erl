@@ -4,6 +4,8 @@
 
 %% API
 -export([start_link/0,
+	get_offline_msg_number/1,
+	get_msg/2,
 	msg_store_read_plum/1,
 	msg_store_delete_plum/2,
 	msg_store_write_plum/2]).
@@ -152,6 +154,16 @@ get_offline_ref(SubscriberId)->
 			not_found;
                 Refs ->
 		  Refs
+            end.
+
+get_offline_msg_number(SubscriberId)->
+   case plumtree_metadata:get({oktalk,msgref}, SubscriberId) of
+                undefined ->
+                        not_found;
+                [] ->
+                        not_found;
+                Refs ->
+                  length(Refs)
             end.
 
 
