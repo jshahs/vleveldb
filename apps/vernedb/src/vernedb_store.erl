@@ -3,9 +3,10 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0,
+-export([start_link/1,
 	get_offline_msg_number/1,
 	get_msg/2,
+	total_subscriptions/0,
 	msg_store_read_plum/1,
 	msg_store_delete_plum/2,
 	msg_store_write_plum/2]).
@@ -25,21 +26,36 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link() ->
-    gen_server:start_link({local,?MODULE},?MODULE, [], []).
+start_link(Id) ->
+	gen_server:start_link(?MODULE, [Id], []).
 
-msg_store_write_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
-    call(MsgRef, {write_plum, SubscriberId, Msg}).
+msg_store_write_plum({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
+    call(ClientId, {write_plum, SubscriberId, Msg}).
 
 msg_store_delete_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
     call(MsgRef, {delete_plum, SubscriberId, Msg}).
 
-msg_store_read_plum(SubscriberId) ->
-    call("not",{read_plum, SubscriberId}).
+msg_store_read_plum({[],ClientId} = SubscriberId) ->
+    call(ClientId,{read_plum, SubscriberId}).
 
+total_subscriptions() ->
+    Total = plumtree_metadata:fold(
+              fun ({_, '$deleted'}, Acc) -> Acc;
+                  ({_, Subs}, Acc) ->
+                      Acc + length(Subs)
+              end, 0, {oktalk,msgref},
+              [{resolver, lww}]),
+    [{total, Total}].
 
 call(Key, Req) ->
-            gen_server:call(?MODULE, Req, infinity).
+	%case vernedb_sup:get_rr_pid() of
+	case vernedb_sup:get_server_pid(Key) of
+		{ok,Pid} ->
+            		gen_server:call(Pid, Req, infinity);
+		Res ->
+			io:format("no_process~n"),
+			{no_process,Res,Key}
+	end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -56,10 +72,10 @@ call(Key, Req) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init(_) ->
+init([Id]) ->
 	application:start(lager),
 	application:start(plumtree),
-	{ok,#state{future_purpose = ok}}.
+	{ok,#state{future_purpose = Id}}.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -185,7 +201,9 @@ handle_req({read_plum, {MP, _} = SubscriberId},
                 not_found;
         Refs ->
 		io:format("The ref::~p~n",[Refs]),
-                [get_msg(SubscriberId,X)|| X <- Refs]
+                AllMsgs = [get_msg(SubscriberId,X)|| X <- Refs],
+		delete_msgs(SubscriberId),
+		AllMsgs
    end;
 
 handle_req({write_plum, {MP, _} = SubscriberId,
@@ -197,10 +215,14 @@ handle_req({write_plum, {MP, _} = SubscriberId,
    Val = term_to_binary(VmqMsg),
    plumtree_metadata:put({oktalk,offline_store},MsgKey,Val);
 
+handle_req(_,_)->
+	ok.
 
+delete_msgs(SubscriberId)->
+	[delete_msg(SubscriberId,X) || X<- get_offline_ref(SubscriberId)],
+	plumtree_metadata:delete({oktalk,msgref},SubscriberId,[{default, []}]).
 
-handle_req({delete_plum, {MP, _} = SubscriberId, MsgRef},
-           _State) ->
+delete_msg(SubscriberId,MsgRef)->
    MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
    plumtree_metadata:delete({oktalk,offline_store},MsgKey,[{default, []}]),
    ok.
