@@ -26,6 +26,7 @@ start_link() ->
          {ok, CPid} = supervisor:start_child(Pid, child_spec(I)),
 	 ets:insert(?TABLE, {I,CPid})
      end || I <- lists:seq(1, ?NR_OF_CHILDS)],
+%    verneDB_install:install(),
     {ok, Pid}.
 
 get_server_pid(Key) when is_binary(Key) ->

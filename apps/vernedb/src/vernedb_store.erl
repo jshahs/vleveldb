@@ -2,10 +2,15 @@
 -include("vmq_server.hrl").
 -behaviour(gen_server).
 
+-include("../include/verneDB.hrl").
+
 %% API
 -export([start_link/1,
 	get_offline_msg_number/1,
 	get_msg/2,
+	mnesia_write/2,
+	mnesia_read/1,
+	total_offline_msgs/0,
 	total_subscriptions/0,
 	msg_store_read_plum/1,
 	msg_store_delete_plum/2,
@@ -37,6 +42,28 @@ msg_store_delete_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
 
 msg_store_read_plum({[],ClientId} = SubscriberId) ->
     call(ClientId,{read_plum, SubscriberId}).
+
+
+mnesia_write({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
+	call(ClientId, {write_mnesia, SubscriberId, Msg}).
+
+mnesia_read({[],ClientId} = SubscriberId) ->
+    call(ClientId,{read_mnesia, SubscriberId}).
+
+traverse_table_and_show(Table_name)->
+    Iterator =  fun(Rec,_)->
+                    io:format("~p~n",[Rec]),
+                    []
+                end,
+    case mnesia:is_transaction() of
+        true -> mnesia:foldl(Iterator,[],Table_name);
+        false ->
+            Exec = fun({Fun,Tab}) -> mnesia:foldl(Fun, [],Tab) end,
+            mnesia:activity(transaction,Exec,[{Iterator,Table_name}],mnesia_frag)
+    end.
+
+total_offline_msgs() ->
+        traverse_table_and_show(vmq_offline_store).
 
 total_subscriptions() ->
     Total = plumtree_metadata:fold(
@@ -214,6 +241,27 @@ handle_req({write_plum, {MP, _} = SubscriberId,
    MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
    Val = term_to_binary(VmqMsg),
    plumtree_metadata:put({oktalk,offline_store},MsgKey,Val);
+
+handle_req({write_mnesia,{MP, _} = SubscriberId,
+	#vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
+                     routing_key=RoutingKey, payload=Payload} = VmqMsg},	
+	_State) ->
+   Rec = #vmq_offline_store{subscriberId = SubscriberId,vmq_msg = VmqMsg},
+        case mnesia:dirty_write(vmq_offline_store,Rec) of
+                ok ->
+                        {ok,updated};
+                Res ->
+                        {error,Res}
+        end;
+
+handle_req({read_mnesia,{MP, _} = SubscriberId},_State) ->
+   case mnesia:dirty_read({vmq_offline_store,SubscriberId}) of
+	[ValList] ->
+		ValList;
+	Res ->
+		Res
+	end;
+
 
 handle_req(_,_)->
 	ok.
