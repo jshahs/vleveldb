@@ -292,12 +292,17 @@ handle_req({read_mnesia,{MP, _} = SubscriberId},_State) ->
 			Res
 		end
 	end,
-	mnesia:activity(sync_dirty, Read, [SubscriberId], mnesia_frag);
-	
+	ValList = mnesia:activity(sync_dirty, Read, [SubscriberId], mnesia_frag),
+	ok = delete_offline(SubscriberId),
+	ValList;
 
 
 handle_req(_,_)->
 	ok.
+
+delete_offline(Key)->
+	Del = fun(Key) -> mnesia:delete({vmq_offline_store,Key}) end,
+	mnesia:activity(sync_dirty, Del, [Key], mnesia_frag).
 
 delete_msgs(SubscriberId)->
 	[delete_msg(SubscriberId,X) || X<- get_offline_ref(SubscriberId)],
