@@ -8,7 +8,7 @@
 -export([start_link/1,
 	get_offline_msg_number/1,
 	get_msg/2,
-	install_table/3,
+	install_table/2,
 	mnesia_write/2,
 	rpc_write/2,
 	mnesia_read/1,
@@ -36,11 +36,11 @@
 start_link(Id) ->
 	gen_server:start_link(?MODULE, [Id], []).
 
-install_table(Nodes,Table,Frag)->
-	mnesia:stop(),
-	mnesia:create_schema(Nodes),
-	mnesia:start(),
-	mnesia:create_table(Table,[
+install_table(Nodes,Frag)->
+%	mnesia:stop(),
+%	mnesia:create_schema(Nodes),
+%	mnesia:start(),
+	mnesia:create_table(vmq_offline_store,[
                     {frag_properties,[
                         {node_pool,Nodes},{hash_module,mnesia_frag_hash},
                         {n_fragments,Frag},
@@ -285,14 +285,14 @@ handle_req({write_mnesia,{MP, _} = SubscriberId,
 
 handle_req({read_mnesia,{MP, _} = SubscriberId},_State) ->
 	Read = fun(SubscriberId) ->
-   		case mnesia:dirty_read({vmq_offline_store,SubscriberId}) of
+   		case mnesia:read({vmq_offline_store,SubscriberId}) of
 		  [ValList] ->
 			ValList;
 		   Res ->
 			Res
 		end
 	end,
-	mnesia:activity(transaction, Read, [SubscriberId], mnesia_frag);
+	mnesia:activity(sync_dirty, Read, [SubscriberId], mnesia_frag);
 	
 
 
