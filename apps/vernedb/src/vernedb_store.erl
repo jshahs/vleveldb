@@ -8,7 +8,9 @@
 -export([start_link/1,
 	get_offline_msg_number/1,
 	get_msg/2,
+	install_table/3,
 	mnesia_write/2,
+	rpc_write/2,
 	mnesia_read/1,
 	total_offline_msgs/0,
 	total_subscriptions/0,
@@ -34,6 +36,19 @@
 start_link(Id) ->
 	gen_server:start_link(?MODULE, [Id], []).
 
+install_table(Nodes,Table,Frag)->
+	mnesia:stop(),
+	mnesia:create_schema(Nodes),
+	mnesia:start(),
+	mnesia:create_table(Table,[
+                    {frag_properties,[
+                        {node_pool,Nodes},{hash_module,mnesia_frag_hash},
+                        {n_fragments,Frag},
+                        {n_disc_copies,length(Nodes)}]
+                    },
+                    {index,[]},{type, bag},
+                    {attributes,record_info(fields,vmq_offline_store)}]).
+
 msg_store_write_plum({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
     call(ClientId, {write_plum, SubscriberId, Msg}).
 
@@ -43,6 +58,17 @@ msg_store_delete_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
 msg_store_read_plum({[],ClientId} = SubscriberId) ->
     call(ClientId,{read_plum, SubscriberId}).
 
+rpc_write(SubscriberId,VmqMsg)->
+   Rec = #vmq_offline_store{subscriberId = SubscriberId,vmq_msg = VmqMsg},
+   Write = fun(Rec) ->
+             case mnesia:dirty_write(vmq_offline_store,Rec) of
+                ok ->
+                        {ok,updated};
+                Res ->
+                        {error,Res}
+             end
+        end,
+   mnesia:activity(sync_dirty, Write,[Rec],mnesia_frag).
 
 mnesia_write({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
 	call(ClientId, {write_mnesia, SubscriberId, Msg}).
@@ -101,7 +127,7 @@ call(Key, Req) ->
 %%--------------------------------------------------------------------
 init([Id]) ->
 	application:start(lager),
-	application:start(plumtree),
+%	application:start(plumtree),
 	{ok,#state{future_purpose = Id}}.
 %%--------------------------------------------------------------------
 %% @private
@@ -247,20 +273,27 @@ handle_req({write_mnesia,{MP, _} = SubscriberId,
                      routing_key=RoutingKey, payload=Payload} = VmqMsg},	
 	_State) ->
    Rec = #vmq_offline_store{subscriberId = SubscriberId,vmq_msg = VmqMsg},
-        case mnesia:dirty_write(vmq_offline_store,Rec) of
+   Write = fun(Rec) -> 
+   	     case mnesia:write(Rec) of
                 ok ->
                         {ok,updated};
                 Res ->
                         {error,Res}
-        end;
+             end
+	end,
+   mnesia:activity(sync_dirty, Write,[Rec],mnesia_frag);
 
 handle_req({read_mnesia,{MP, _} = SubscriberId},_State) ->
-   case mnesia:dirty_read({vmq_offline_store,SubscriberId}) of
-	[ValList] ->
-		ValList;
-	Res ->
-		Res
-	end;
+	Read = fun(SubscriberId) ->
+   		case mnesia:dirty_read({vmq_offline_store,SubscriberId}) of
+		  [ValList] ->
+			ValList;
+		   Res ->
+			Res
+		end
+	end,
+	mnesia:activity(transaction, Read, [SubscriberId], mnesia_frag);
+	
 
 
 handle_req(_,_)->
