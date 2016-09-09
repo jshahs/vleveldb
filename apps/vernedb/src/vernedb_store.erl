@@ -2,21 +2,16 @@
 -include("vmq_server.hrl").
 -behaviour(gen_server).
 
--include("../include/verneDB.hrl").
+-include("../include/vernedb.hrl").
 
 %% API
 -export([start_link/1,
-	get_offline_msg_number/1,
-	get_msg/2,
+	install_subscription/2,
 	install_table/2,
 	mnesia_write/2,
-	rpc_write/2,
 	mnesia_read/1,
 	total_offline_msgs/0,
-	total_subscriptions/0,
-	msg_store_read_plum/1,
-	msg_store_delete_plum/2,
-	msg_store_write_plum/2]).
+	total_subscriptions/0]).
 
 
 %% gen_server callbacks
@@ -49,26 +44,17 @@ install_table(Nodes,Frag)->
                     {index,[]},{type, bag},
                     {attributes,record_info(fields,vmq_offline_store)}]).
 
-msg_store_write_plum({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
-    call(ClientId, {write_plum, SubscriberId, Msg}).
 
-msg_store_delete_plum(SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
-    call(MsgRef, {delete_plum, SubscriberId, Msg}).
+install_subscription(Nodes,Frag)->
+mnesia:create_table(vmq_subscription,[
+                    {frag_properties,[
+                        {node_pool,Nodes},{hash_module,mnesia_frag_hash},
+                        {n_fragments,Frag},
+                        {n_disc_copies,length(Nodes)}]
+                    },
+                    {index,[]},{type, bag},
+                    {attributes,record_info(fields,vmq_subscription)}]).
 
-msg_store_read_plum({[],ClientId} = SubscriberId) ->
-    call(ClientId,{read_plum, SubscriberId}).
-
-rpc_write(SubscriberId,VmqMsg)->
-   Rec = #vmq_offline_store{subscriberId = SubscriberId,vmq_msg = VmqMsg},
-   Write = fun(Rec) ->
-             case mnesia:dirty_write(vmq_offline_store,Rec) of
-                ok ->
-                        {ok,updated};
-                Res ->
-                        {error,Res}
-             end
-        end,
-   mnesia:activity(sync_dirty, Write,[Rec],mnesia_frag).
 
 mnesia_write({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
 	call(ClientId, {write_mnesia, SubscriberId, Msg}).
@@ -101,8 +87,8 @@ total_subscriptions() ->
     [{total, Total}].
 
 call(Key, Req) ->
-	%case vernedb_sup:get_rr_pid() of
-	case vernedb_sup:get_server_pid(Key) of
+	case vernedb_sup:get_rr_pid() of
+%	case vernedb_sup:get_server_pid(Key) of
 		{ok,Pid} ->
             		gen_server:call(Pid, Req, infinity);
 		Res ->
@@ -201,72 +187,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-update_offline_ref(SubscriberId,MsgRef) ->
-	case plumtree_metadata:get({oktalk,msgref}, SubscriberId) of
-                undefined ->
-		   plumtree_metadata:put({oktalk,msgref}, SubscriberId,
-                                          [MsgRef]);
-                [] ->
-		   plumtree_metadata:put({oktalk,msgref}, SubscriberId,
-                                          [MsgRef]);
-                Refs ->
-		    NewRef = [MsgRef|Refs],
-                    plumtree_metadata:put({oktalk,msgref}, SubscriberId,
-                                          NewRef)
-            end.
 
-get_offline_ref(SubscriberId)->
-   case plumtree_metadata:get({oktalk,msgref}, SubscriberId) of
-                undefined ->
-			not_found;
-                [] ->
-			not_found;
-                Refs ->
-		  Refs
-            end.
-
-get_offline_msg_number(SubscriberId)->
-   case plumtree_metadata:get({oktalk,msgref}, SubscriberId) of
-                undefined ->
-                        not_found;
-                [] ->
-                        not_found;
-                Refs ->
-                  length(Refs)
-            end.
-
-
-get_msg(SubscriberId,MsgRef)->
-   MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
-   case plumtree_metadata:get({oktalk,offline_store},MsgKey,[{default, []}]) of
-        [] ->
-                not_found;
-        Val ->
-                VmqMsg = binary_to_term(Val),
-                VmqMsg
-  end.
-
-handle_req({read_plum, {MP, _} = SubscriberId},
-           _State) ->
-   MsgRefs = get_offline_ref(SubscriberId),
-   case MsgRefs of
-        not_found ->
-                not_found;
-        Refs ->
-		io:format("The ref::~p~n",[Refs]),
-                AllMsgs = [get_msg(SubscriberId,X)|| X <- Refs],
-		delete_msgs(SubscriberId),
-		AllMsgs
-   end;
-
-handle_req({write_plum, {MP, _} = SubscriberId,
-            #vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
-                     routing_key=RoutingKey, payload=Payload} = VmqMsg},
-           _State) ->
-   Res = update_offline_ref(SubscriberId,MsgRef),
-   MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
-   Val = term_to_binary(VmqMsg),
-   plumtree_metadata:put({oktalk,offline_store},MsgKey,Val);
 
 handle_req({write_mnesia,{MP, _} = SubscriberId,
 	#vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
@@ -304,11 +225,3 @@ delete_offline(Key)->
 	Del = fun(Key) -> mnesia:delete({vmq_offline_store,Key}) end,
 	mnesia:activity(sync_dirty, Del, [Key], mnesia_frag).
 
-delete_msgs(SubscriberId)->
-	[delete_msg(SubscriberId,X) || X<- get_offline_ref(SubscriberId)],
-	plumtree_metadata:delete({oktalk,msgref},SubscriberId,[{default, []}]).
-
-delete_msg(SubscriberId,MsgRef)->
-   MsgKey = sext:encode({msg, MsgRef, SubscriberId}),
-   plumtree_metadata:delete({oktalk,offline_store},MsgKey,[{default, []}]),
-   ok.

@@ -2,7 +2,7 @@
 
 %%Subscription data
 
--record(vmq_trie_subs,{subscriberId,
+-record(vmq_subscription,{subscriberId,
 			topic }).
 
 -record(vmq_offline_store,{subscriberId,
