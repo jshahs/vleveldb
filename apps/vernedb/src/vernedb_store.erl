@@ -46,15 +46,27 @@ install_table(Nodes,Frag)->
 
 
 install_subscription(Nodes,Frag)->
-mnesia:create_table(vmq_subscription,[
+mnesia:create_table(vmq_subscriber,[
                     {frag_properties,[
                         {node_pool,Nodes},{hash_module,mnesia_frag_hash},
                         {n_fragments,Frag},
                         {n_disc_copies,length(Nodes)}]
                     },
                     {index,[]},{type, bag},
-                    {attributes,record_info(fields,vmq_subscription)}]).
+                    {attributes,record_info(fields,vmq_subscriber)}]).
 
+
+add_subscriber({[],ClientId} = SubscriberId,Topic) ->
+	call(ClientId, {add_subscriber, SubscriberId, Topic }).
+
+read_subsciptions({[],ClientId} = SubscriberId) ->
+	call(ClientId, {read_subs, SubscriberId}).
+
+all_subscriptions()->
+	call("all",all_subs).
+
+delete_subscriber({[],ClientId} = SubscriberId,Topic) ->
+	call(ClientId, {delete_subscriber, SubscriberId, Topic }).
 
 mnesia_write({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
 	call(ClientId, {write_mnesia, SubscriberId, Msg}).
@@ -187,7 +199,34 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+handle_req({read_subscriber,{MP, _} = SubscriberId},_State) ->
+        Read = fun(SubscriberId) ->
+                case mnesia:read({vmq_subscriber,SubscriberId}) of
+                  [ValList] ->
+                        ValList;
+                   Res ->
+                        Res
+                end
+        end,
+        ValList = mnesia:activity(sync_dirty, Read, [SubscriberId], mnesia_frag),
+        ValList;
 
+handle_req({add_subscriber,{MP, _} = SubscriberId,Topic},
+        _State) ->
+   Rec = #vmq_subscriber{subscriberId = SubscriberId,topic = Topic},
+   Write = fun(Rec) ->
+             case mnesia:write(Rec) of
+                ok ->
+                        {ok,updated};
+                Res ->
+                        {error,Res}
+             end
+        end,
+   mnesia:activity(sync_dirty, Write,[Rec],mnesia_frag);
+
+
+handle_req(all_subs,_State)->
+	traverse_table_and_show(vmq_subscriber);
 
 handle_req({write_mnesia,{MP, _} = SubscriberId,
 	#vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
