@@ -1,14 +1,13 @@
--module(vdb_user).
+-module(vdb_sub).
 -behaviour(gen_server).
 
 -include("../include/vdb.hrl").
 
 %% API
--export([start_link/1,
-	install_user_table/2,
-	user_online/3,
-	user_offline/1,
-	user_status/1]).
+-export([start_link/0,
+	install_subs_table/2,
+	add_sub/2,
+	del_sub/2]).
 
 
 %% gen_server callbacks
@@ -25,21 +24,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link(Id) ->
-	gen_server:start_link(?MODULE, [Id], []).
-
-install_user_table(Nodes,Frag)->
-%	mnesia:stop(),
-%	mnesia:create_schema(Nodes),
-%	mnesia:start(),
-	mnesia:create_table(vdb_users,[
-                    {frag_properties,[
-                        {node_pool,Nodes},{hash_module,mnesia_frag_hash},
-                        {n_fragments,Frag},
-                        {n_disc_copies,length(Nodes)}]
-                    },
-                    {index,[]},
-                    {attributes,record_info(fields,vdb_users)}]).
+start_link() ->
+	gen_server:start_link({local,?MODULE},?MODULE, [], []).
 
 
 
@@ -56,17 +42,12 @@ install_subs_table(Nodes,Frag)->
                     {index,[]},
                     {attributes,record_info(fields,vdb_topics)}]).
 
-user_online(SubscriberId,SessionId,Node) ->
-	call({online, SubscriberId, SessionId,Node}).
+add_sub(SubscriberId,Topics)->
+	call({add_sub,SubscriberId,Topics}).
 
-user_offline(SubscriberId) ->
-	call( {offline, SubscriberId }).
+del_sub(SubscriberId,Topics)->
+        call({del_sub,SubscriberId,Topics}).
 
-user_uninstalled(SubscriberId) ->
-        call({uninstalled, SubscriberId }).
-
-user_status(SubscriberId) ->
-        call({status, SubscriberId }).
 traverse_table_and_show(Table_name)->
     Iterator =  fun(Rec,_)->
                     io:format("~p~n",[Rec]),
@@ -81,13 +62,13 @@ traverse_table_and_show(Table_name)->
 
 
 call(Req) ->
-	case vernedb_sup:get_rr_pid() of
-		{ok,Pid} ->
-            		gen_server:call(Pid, Req, infinity);
-		Res ->
-			io:format("no_process~n"),
-			{no_process,Res}
-	end.
+	%case vernedb_sup:get_rr_pid() of
+	%	{ok,Pid} ->
+            		gen_server:call(?MODULE, Req, infinity).
+	%	Res ->
+	%		io:format("no_process~n"),
+	%		{no_process,Res}
+	%end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -104,10 +85,10 @@ call(Req) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Id]) ->
-	application:start(lager),
+init(_) ->
+	%application:start(lager),
 %	application:start(plumtree),
-	{ok,#state{future_purpose = Id}}.
+	{ok,#state{future_purpose = 1}}.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -180,23 +161,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-handle_req({online,SubscriberId,SessionId,Node},_State) ->
-   Rec = #vdb_users{subscriberId = SubscriberId,status = online,on_node = Node,sessionId = SessionId},
-   vdb_table_if:write(vdb_users,Rec);
+handle_req({add_sub,SubscriberId,Topics},_State) ->
+   Rec = #vdb_topics{subscriberId = SubscriberId,topic = Topics},
+   vdb_table_if:write(vdb_topics,Rec);
 
 
+handle_req({del_sub,SubscriberId,Topics},_State) ->
+   vdb_table_if:delete(vdb_topics,{Topics,SubscriberId});
 
-handle_req({offline,SubscriberId},_State) ->
-   Rec = #vdb_users{subscriberId = SubscriberId,status = offline},
-   vdb_table_if:write(vdb_users,Rec);
-
-handle_req({uninstalled,SubscriberId,SessionId,Node},_State) ->
-   Rec = #vdb_users{subscriberId = SubscriberId,status = uninstalled},
-   vdb_table_if:write(vdb_users,Rec);
-
-handle_req({status,SubscriberId},_State) ->
-   vdb_table_if:read(vdb_users,SubscriberId);
-
+handle_req({read_sub,Key},_State) ->
+   vdb_table_if:read(vdb_topics,Key);
 
 
 handle_req(_,_)->

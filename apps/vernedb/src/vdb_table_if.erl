@@ -1,10 +1,10 @@
 -module(vdb_table_if).
 
--export([update/2,read/2,delete/2]).
+-export([write/2,read/2,delete/2]).
 
 
 
-update(Tab,Rec)->
+write(Tab,Rec)->
    Write = fun(Rec) ->
              case mnesia:write(Rec) of
                 ok ->
