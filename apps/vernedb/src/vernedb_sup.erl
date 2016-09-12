@@ -14,7 +14,7 @@
 -export([init/1]).
 
 -define(NR_OF_CHILDS, 200).
--define(TABLE, vernedb_pool).
+-define(TABLE, vdb_pool).
 
 %% ===================================================================
 %% API functions
@@ -74,6 +74,6 @@ init([]) ->
     {ok, { {one_for_one, 5, 10}, []} }.
 
 child_spec(I) ->
-    {{vernedb_pool, I},
-     {vernedb_store, start_link, [I]},
+    {{vdb_pool, I},
+     {vdb, start_link, [I]},
      permanent, 5000, worker, [vernedb_store]}.

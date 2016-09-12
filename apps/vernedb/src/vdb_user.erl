@@ -1,17 +1,14 @@
--module(vernedb_store).
--include("vmq_server.hrl").
+-module(vdb_user).
 -behaviour(gen_server).
 
--include("../include/vernedb.hrl").
+-include("../include/vdb.hrl").
 
 %% API
 -export([start_link/1,
-	install_subscription/2,
-	install_table/2,
-	mnesia_write/2,
-	mnesia_read/1,
-	total_offline_msgs/0,
-	total_subscriptions/0]).
+	install_user_table/2,
+	user_online/3,
+	user_offline/1,
+	user_status/1]).
 
 
 %% gen_server callbacks
@@ -31,49 +28,33 @@
 start_link(Id) ->
 	gen_server:start_link(?MODULE, [Id], []).
 
-install_table(Nodes,Frag)->
+install_user_table(Nodes,Frag)->
 %	mnesia:stop(),
 %	mnesia:create_schema(Nodes),
 %	mnesia:start(),
-	mnesia:create_table(vmq_offline_store,[
+	mnesia:create_table(vdb_users,[
                     {frag_properties,[
                         {node_pool,Nodes},{hash_module,mnesia_frag_hash},
                         {n_fragments,Frag},
                         {n_disc_copies,length(Nodes)}]
                     },
-                    {index,[]},{type, bag},
-                    {attributes,record_info(fields,vmq_offline_store)}]).
+                    {index,[]},
+                    {attributes,record_info(fields,vdb_users)}]).
 
 
-install_subscription(Nodes,Frag)->
-mnesia:create_table(vmq_subscriber,[
-                    {frag_properties,[
-                        {node_pool,Nodes},{hash_module,mnesia_frag_hash},
-                        {n_fragments,Frag},
-                        {n_disc_copies,length(Nodes)}]
-                    },
-                    {index,[]},{type, bag},
-                    {attributes,record_info(fields,vmq_subscriber)}]).
 
 
-add_subscriber({[],ClientId} = SubscriberId,Topic) ->
-	call(ClientId, {add_subscriber, SubscriberId, Topic }).
+user_online(SubscriberId,SessionId,Node) ->
+	call({online, SubscriberId, SessionId,Node}).
 
-read_subsciptions({[],ClientId} = SubscriberId) ->
-	call(ClientId, {read_subs, SubscriberId}).
+user_offline(SubscriberId) ->
+	call( {offline, SubscriberId }).
 
-all_subscriptions()->
-	call("all",all_subs).
+user_uninstalled(SubscriberId) ->
+        call({uninstalled, SubscriberId }).
 
-delete_subscriber({[],ClientId} = SubscriberId,Topic) ->
-	call(ClientId, {delete_subscriber, SubscriberId, Topic }).
-
-mnesia_write({[],ClientId} = SubscriberId, #vmq_msg{msg_ref=MsgRef} = Msg) ->
-	call(ClientId, {write_mnesia, SubscriberId, Msg}).
-
-mnesia_read({[],ClientId} = SubscriberId) ->
-    call(ClientId,{read_mnesia, SubscriberId}).
-
+user_status(SubscriberId) ->
+        call({status, SubscriberId }).
 traverse_table_and_show(Table_name)->
     Iterator =  fun(Rec,_)->
                     io:format("~p~n",[Rec]),
@@ -86,26 +67,14 @@ traverse_table_and_show(Table_name)->
             mnesia:activity(transaction,Exec,[{Iterator,Table_name}],mnesia_frag)
     end.
 
-total_offline_msgs() ->
-        traverse_table_and_show(vmq_offline_store).
 
-total_subscriptions() ->
-    Total = plumtree_metadata:fold(
-              fun ({_, '$deleted'}, Acc) -> Acc;
-                  ({_, Subs}, Acc) ->
-                      Acc + length(Subs)
-              end, 0, {oktalk,msgref},
-              [{resolver, lww}]),
-    [{total, Total}].
-
-call(Key, Req) ->
+call(Req) ->
 	case vernedb_sup:get_rr_pid() of
-%	case vernedb_sup:get_server_pid(Key) of
 		{ok,Pid} ->
             		gen_server:call(Pid, Req, infinity);
 		Res ->
 			io:format("no_process~n"),
-			{no_process,Res,Key}
+			{no_process,Res}
 	end.
 
 %%%===================================================================
@@ -199,68 +168,26 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-handle_req({read_subscriber,{MP, _} = SubscriberId},_State) ->
-        Read = fun(SubscriberId) ->
-                case mnesia:read({vmq_subscriber,SubscriberId}) of
-                  [ValList] ->
-                        ValList;
-                   Res ->
-                        Res
-                end
-        end,
-        ValList = mnesia:activity(sync_dirty, Read, [SubscriberId], mnesia_frag),
-        ValList;
-
-handle_req({add_subscriber,{MP, _} = SubscriberId,Topic},
-        _State) ->
-   Rec = #vmq_subscriber{subscriberId = SubscriberId,topic = Topic},
-   Write = fun(Rec) ->
-             case mnesia:write(Rec) of
-                ok ->
-                        {ok,updated};
-                Res ->
-                        {error,Res}
-             end
-        end,
-   mnesia:activity(sync_dirty, Write,[Rec],mnesia_frag);
+handle_req({online,SubscriberId,SessionId,Node},_State) ->
+   Rec = #vdb_users{subscriberId = SubscriberId,status = online,on_node = Node,sessionId = SessionId},
+   vdb_table_if:write(vdb_users,Rec);
 
 
-handle_req(all_subs,_State)->
-	traverse_table_and_show(vmq_subscriber);
 
-handle_req({write_mnesia,{MP, _} = SubscriberId,
-	#vmq_msg{msg_ref=MsgRef, mountpoint=MP, dup=Dup, qos=QoS,
-                     routing_key=RoutingKey, payload=Payload} = VmqMsg},	
-	_State) ->
-   Rec = #vmq_offline_store{subscriberId = SubscriberId,vmq_msg = VmqMsg},
-   Write = fun(Rec) -> 
-   	     case mnesia:write(Rec) of
-                ok ->
-                        {ok,updated};
-                Res ->
-                        {error,Res}
-             end
-	end,
-   mnesia:activity(sync_dirty, Write,[Rec],mnesia_frag);
+handle_req({offline,SubscriberId},_State) ->
+   Rec = #vdb_users{subscriberId = SubscriberId,status = offline},
+   vdb_table_if:write(vdb_users,Rec);
 
-handle_req({read_mnesia,{MP, _} = SubscriberId},_State) ->
-	Read = fun(SubscriberId) ->
-   		case mnesia:read({vmq_offline_store,SubscriberId}) of
-		  [ValList] ->
-			ValList;
-		   Res ->
-			Res
-		end
-	end,
-	ValList = mnesia:activity(sync_dirty, Read, [SubscriberId], mnesia_frag),
-	ok = delete_offline(SubscriberId),
-	ValList;
+handle_req({uninstalled,SubscriberId,SessionId,Node},_State) ->
+   Rec = #vdb_users{subscriberId = SubscriberId,status = uninstalled},
+   vdb_table_if:write(vdb_users,Rec);
+
+handle_req({status,SubscriberId},_State) ->
+   vdb_table_if:read(vdb_users,SubscriberId);
+
 
 
 handle_req(_,_)->
 	ok.
 
-delete_offline(Key)->
-	Del = fun(Key) -> mnesia:delete({vmq_offline_store,Key}) end,
-	mnesia:activity(sync_dirty, Del, [Key], mnesia_frag).
 
