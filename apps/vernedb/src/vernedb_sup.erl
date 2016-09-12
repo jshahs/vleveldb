@@ -75,5 +75,5 @@ init([]) ->
 
 child_spec(I) ->
     {{vdb_pool, I},
-     {vdb, start_link, [I]},
+     {vdb_user, start_link, [I]},
      permanent, 5000, worker, [vernedb_store]}.
