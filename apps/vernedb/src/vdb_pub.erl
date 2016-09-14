@@ -158,12 +158,47 @@ handle_req(_,_)->
 
 
 route_publish(RoutingKey,MsgRef,Msg) ->
-	Rec = vdb_table_if:read(vdb_topic,[{RoutingKey,1}]),
-	Sub = Rec#vdb_topics.subscriberId,
-	UserTable = vdb_table_if:read(vdb_users,Sub),
-	Node = UserTable#vdb_users.on_node,
-	SessionId = UserTable#vdb_users.sessionId,
-	Res = rpc:call(Node,vmq_publish,route,[SessionId,Msg]),
-	io:format("Routing result is:~p~n",[Res]),
+	case vdb_table_if:read(vdb_topics,[{RoutingKey,1}]) of
+		[] ->
+			[];
+		Recs when is_list(Recs) ->
+			session(Recs,MsgRef,Msg);
+		Rec ->
+		   case vdb_table_if:read(vdb_users,Rec#vdb_topics.subscriberId) of
+			[] ->
+				[];
+			#vdb_users{status = online} = Usr  ->
+				[Usr#vdb_users.on_node,Usr#vdb_users.sessionId];
+			#vdb_users{status = offline} = Usr  ->
+				spawn(?MODULE,write_store,[Rec#vdb_topics.subscriberId,Msg]),
+				[]
+	end.
+
+session(Recs,MsgRef,Msg) ->
+	UserTab = [vdb_table_if:read(vdb_users,X#vdb_topics.subscriberId) ||X <- 
+					vdb_table_if:read(vdb_topics,[{[<<"junnu">>],1}])],
+	InactiveUsers = [X#vdb_users.subscriberId || X <- UserTab,X#vdb_users.status == offline],
+	spawn(?MODULE,handle_offline_msgs,[InactiveUsers,MsgRef,Msg]),
+	ActiveUsers = [{X#vdb_users.on_node,X#vdb_users.sessionId} || X <- UserTab, X#vdb_users.status == online ], 
+	Nodes = lists:usort([X#vdb_users.on_node || X <- UserTab, X#vdb_users.status == online]),
+	[session_info(X,ActiveUsers) || X <- Nodes,Nodes =/= []].
+
+session_info(_Node,[])->
+	{};
+
+session_info([],_)->
+	{};
+
+session_info(Node,ActiveUsers) ->
+	SessionInfo = [X || {X,Y} <- ActiveUsers,X=:= Node],
+	{Node,SessionInfo}.
+
+handle_offline_msgs([],_,_) ->
+	ok;
+handle_offline_msgs(InactiveUsers,MsgRef,Msg) ->
+	[write_store(X,Msg) || X <- InactiveUsers],
 	ok.
 
+write_store(SubId,Msg)->
+	Rec = #vdb_store{subscriberId = SubId,vmq_msg = Msg},
+	vdb_table_if:write(vdb_store,Rec).	
