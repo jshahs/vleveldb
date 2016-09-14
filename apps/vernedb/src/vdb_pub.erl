@@ -1,13 +1,12 @@
--module(vdb_sub).
+-module(vdb_pub).
 -behaviour(gen_server).
 
 -include("../include/vdb.hrl").
 
 %% API
 -export([start_link/0,
-	install_subs_table/2,
-	add_sub/2,
-	del_sub/2]).
+	install_store_table/2,
+	publish/2]).
 
 
 %% gen_server callbacks
@@ -29,36 +28,23 @@ start_link() ->
 
 
 
-install_subs_table(Nodes,Frag)->
+install_store_table(Nodes,Frag)->
 %       mnesia:stop(),
 %       mnesia:create_schema(Nodes),
 %       mnesia:start(),
-        mnesia:create_table(vdb_topics,[
+        mnesia:create_table(vdb_store,[
                     {frag_properties,[
                         {node_pool,Nodes},{hash_module,mnesia_frag_hash},
                         {n_fragments,Frag},
                         {n_disc_copies,length(Nodes)}]
                     },
                     {index,[]},{type,bag},
-                    {attributes,record_info(fields,vdb_topics)}]).
+                    {attributes,record_info(fields,vdb_store)}]).
 
-add_sub(SubscriberId,Topics)->
-	call({add_sub,SubscriberId,Topics}).
+publish(SubscriberId,Msg)->
+	call({publish,SubscriberId,Msg}).
 
-del_sub(SubscriberId,Topics)->
-        call({del_sub,SubscriberId,Topics}).
 
-traverse_table_and_show(Table_name)->
-    Iterator =  fun(Rec,_)->
-                    io:format("~p~n",[Rec]),
-                    []
-                end,
-    case mnesia:is_transaction() of
-        true -> mnesia:foldl(Iterator,[],Table_name);
-        false ->
-            Exec = fun({Fun,Tab}) -> mnesia:foldl(Fun, [],Tab) end,
-            mnesia:activity(transaction,Exec,[{Iterator,Table_name}],mnesia_frag)
-    end.
 
 
 call(Req) ->
@@ -161,19 +147,23 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-handle_req({add_sub,SubscriberId,Topics},_State) ->
-   Rec = #vdb_topics{subscriberId = SubscriberId,topic = Topics},
-   vdb_table_if:write(vdb_topics,Rec);
-
-
-handle_req({del_sub,SubscriberId,Topics},_State) ->
-   vdb_table_if:delete(vdb_topics,{Topics,SubscriberId});
-
-handle_req({read_sub,Key},_State) ->
-   vdb_table_if:read(vdb_topics,Key);
+handle_req({publish,SubscriberId,#vmq_msg{msg_ref=MsgRef,
+			routing_key=RoutingKey } = Msg},_State) ->
+	route_publish(RoutingKey,MsgRef,Msg);
 
 
 handle_req(_,_)->
 	ok.
 
+
+
+route_publish(RoutingKey,MsgRef,Msg) ->
+	Rec = vdb_table_if:read(vdb_topic,[{RoutingKey,1}]),
+	Sub = Rec#vdb_topics.subscriberId,
+	UserTable = vdb_table_if:read(vdb_users,Sub),
+	Node = UserTable#vdb_users.on_node,
+	SessionId = UserTable#vdb_users.sessionId,
+	Res = rpc:call(Node,vmq_publish,route,[SessionId,Msg]),
+	io:format("Routing result is:~p~n",[Res]),
+	ok.
 
