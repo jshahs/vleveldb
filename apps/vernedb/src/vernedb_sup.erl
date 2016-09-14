@@ -27,6 +27,7 @@ start_link() ->
 	 ets:insert(?TABLE, {I,CPid})
      end || I <- lists:seq(1, ?NR_OF_CHILDS)],
      vdb_sub:start_link(),
+     vdb_pub:start_link(),
 %    verneDB_install:install(),
     {ok, Pid}.
 
