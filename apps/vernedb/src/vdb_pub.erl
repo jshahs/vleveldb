@@ -6,6 +6,7 @@
 %% API
 -export([start_link/0,
 	install_store_table/2,
+	handle_offline_msgs/3,
 	publish/2]).
 
 
@@ -191,7 +192,7 @@ session_info([],_)->
 	{};
 
 session_info(Node,ActiveUsers) ->
-	SessionInfo = [X || {X,Y} <- ActiveUsers,X=:= Node],
+	SessionInfo = [Y || {X,Y} <- ActiveUsers,X=:= Node],
 	{Node,SessionInfo}.
 
 handle_offline_msgs([],_,_) ->

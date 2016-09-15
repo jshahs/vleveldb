@@ -1,8 +1,10 @@
 -module(vdb_table_if).
 
--export([write/2,read/2,delete/2]).
+-export([write/2,read/2,delete/2,select/2]).
 
-
+select(Tab,MatchSpec) ->
+	Sel = fun(Tab,MatchSpec) -> mnesia:select(Tab,MatchSpec) end,
+	mnesia:activity(sync_dirty,Sel,[Tab,MatchSpec],mnesia_frag).
 
 write(Tab,Rec)->
    Write = fun(Rec) ->

@@ -182,9 +182,9 @@ code_change(_OldVsn, State, _Extra) ->
 
 handle_req({online,SubscriberId,SessionId,Node},_State) ->
    Rec = #vdb_users{subscriberId = SubscriberId,status = online,on_node = Node,sessionId = SessionId},
-   vdb_table_if:write(vdb_users,Rec);
-
-
+   vdb_table_if:write(vdb_users,Rec),
+   MatchSpec = [{{vdb_store,SubscriberId,'$1'},[],['$1']}],
+   vdb_table_if:select(vdb_store,MatchSpec);
 
 handle_req({offline,SubscriberId},_State) ->
    Rec = #vdb_users{subscriberId = SubscriberId,status = offline},
