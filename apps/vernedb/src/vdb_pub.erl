@@ -172,6 +172,7 @@ route_publish(RoutingKey,MsgRef,Msg) ->
 			#vdb_users{status = offline} = Usr  ->
 				spawn(?MODULE,write_store,[Rec#vdb_topics.subscriberId,Msg]),
 				[]
+		  end
 	end.
 
 session(Recs,MsgRef,Msg) ->
