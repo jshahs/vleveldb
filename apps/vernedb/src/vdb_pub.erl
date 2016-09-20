@@ -26,8 +26,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link() ->
-	gen_server:start_link({local,?MODULE},?MODULE, [], []).
+start_link(I) ->
+	gen_server:start_link(?MODULE, [I], []).
 
 
 
@@ -79,10 +79,10 @@ call(Req) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init(_) ->
+init([I]) ->
 	%application:start(lager),
 %	application:start(plumtree),
-	{ok,#state{future_purpose = 1}}.
+	{ok,#state{future_purpose = I}}.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
