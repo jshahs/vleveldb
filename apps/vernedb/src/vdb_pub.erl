@@ -5,8 +5,10 @@
 
 %% API
 -export([start_link/0,
+	handle_no_session/2,
 	install_store_table/2,
 	handle_offline_msgs/3,
+	waiting_for_acks/2,
 	publish/2]).
 
 
@@ -46,7 +48,12 @@ publish(SubscriberId,Msg)->
 	call({publish,SubscriberId,Msg}).
 
 
+waiting_for_acks(SubscriberId,Msgs)->
+	call({waiting_for_acks,SubscriberId,Msgs}).
 
+
+handle_no_session(SessionId,Msg) ->
+	call({no_session,SessionId,Msg}).
 
 call(Req) ->
 	%case vernedb_sup:get_rr_pid() of
@@ -152,11 +159,21 @@ handle_req({publish,SubscriberId,#vmq_msg{msg_ref=MsgRef,
 			routing_key=RoutingKey } = Msg},_State) ->
 	route_publish(RoutingKey,MsgRef,Msg);
 
+handle_req({waiting_for_acks,SubscriberId,Msg},_State) ->
+	store_in_offline(SubscriberId,Msg);
+
+handle_req({no_session,SessionId,Msg},_State) ->
+	Val = #vdb_users{subscriberId = '$1',status = '_',on_node='_',sessionId=SessionId},
+ 	MatchSpec = [{Val,[],['$1']}],
+	SubscriberId = vdb_table_if:select(vdb_store,MatchSpec),
+        store_in_offline(SubscriberId,[Msg]);
 
 handle_req(_,_)->
 	ok.
 
-
+store_in_offline(SubscriberId,Msgs) ->
+	[ vdb_table_if:write( vdb_store,#vdb_store{subscriberId = SubscriberId,vmq_msg = X} ) || 
+		{_,_,X} <- Msgs ] .
 
 route_publish(RoutingKey,MsgRef,Msg) ->
 	case vdb_table_if:read(vdb_topics,[{RoutingKey,1}]) of
